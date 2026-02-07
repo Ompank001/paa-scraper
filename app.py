@@ -10,7 +10,51 @@ app = Flask(__name__)
 SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
 
 
-def parse_question(item):
+def is_relevant_question(question, keyword):
+    """
+    Determine if a question is relevant to the keyword.
+    Returns True if relevant, False if less relevant (contains brand names, etc.)
+    """
+    question_lower = question.lower()
+    keyword_lower = keyword.lower()
+
+    # Common coffee machine brands (example)
+    brand_names = [
+        "jura", "delonghi", "de'longhi", "philips", "nespresso", "senseo",
+        "dolce gusto", "siemens", "bosch", "melitta", "krups", "saeco",
+        "moccamaster", "bialetti", "lavazza", "illy", "sage", "breville",
+        # Car brands
+        "bmw", "mercedes", "audi", "volkswagen", "toyota", "honda", "ford",
+        "tesla", "volvo", "peugeot", "renault", "opel", "kia", "hyundai",
+        # Tech brands
+        "apple", "samsung", "sony", "lg", "google", "microsoft", "amazon",
+        # Add more as needed
+    ]
+
+    # Check if question contains the keyword - likely relevant
+    keyword_words = keyword_lower.split()
+    contains_keyword = any(word in question_lower for word in keyword_words if len(word) > 2)
+
+    # Check if question contains brand names - less relevant if brand not in keyword
+    contains_brand = False
+    for brand in brand_names:
+        if brand in question_lower and brand not in keyword_lower:
+            contains_brand = True
+            break
+
+    # Relevant if contains keyword and no unrelated brand
+    if contains_keyword and not contains_brand:
+        return True
+
+    # Less relevant if contains brand not in keyword
+    if contains_brand:
+        return False
+
+    # Default: if doesn't contain keyword, less relevant
+    return contains_keyword
+
+
+def parse_question(item, keyword=""):
     """Parse a single question item from SerpAPI response."""
     question = item.get("question", "")
 
@@ -31,12 +75,16 @@ def parse_question(item):
         source_title = first_ref.get("title", "")
         source_url = first_ref.get("link", "")
 
+    # Determine relevance
+    relevant = is_relevant_question(question, keyword) if keyword else True
+
     return {
         "question": question,
         "answer": answer,
         "source_title": source_title,
         "source_url": source_url,
-        "next_page_token": item.get("next_page_token", "")
+        "next_page_token": item.get("next_page_token", ""),
+        "relevant": relevant
     }
 
 
@@ -81,14 +129,15 @@ def scrape_people_also_ask(keyword, expand_questions=True, max_results=20):
         tokens_to_expand = []
 
         for item in related_questions:
-            parsed = parse_question(item)
+            parsed = parse_question(item, keyword)
             if parsed["question"] and parsed["question"] not in seen_questions:
                 seen_questions.add(parsed["question"])
                 results.append({
                     "question": parsed["question"],
                     "answer": parsed["answer"],
                     "source_title": parsed["source_title"],
-                    "source_url": parsed["source_url"]
+                    "source_url": parsed["source_url"],
+                    "relevant": parsed["relevant"]
                 })
                 if parsed["next_page_token"]:
                     tokens_to_expand.append(parsed["next_page_token"])
@@ -111,14 +160,15 @@ def scrape_people_also_ask(keyword, expand_questions=True, max_results=20):
                     for item in expand_data.get("related_questions", []):
                         if len(results) >= max_results:
                             break
-                        parsed = parse_question(item)
+                        parsed = parse_question(item, keyword)
                         if parsed["question"] and parsed["question"] not in seen_questions:
                             seen_questions.add(parsed["question"])
                             results.append({
                                 "question": parsed["question"],
                                 "answer": parsed["answer"],
                                 "source_title": parsed["source_title"],
-                                "source_url": parsed["source_url"]
+                                "source_url": parsed["source_url"],
+                                "relevant": parsed["relevant"]
                             })
                 except Exception:
                     continue  # Skip failed expansions

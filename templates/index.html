@@ -196,6 +196,35 @@
             text-decoration: underline;
         }
 
+        .section-header {
+            font-size: 1.4rem;
+            font-weight: 600;
+            color: #333;
+            margin: 30px 0 15px 0;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #1a73e8;
+        }
+
+        .section-header.less-relevant {
+            color: #666;
+            border-bottom-color: #999;
+        }
+
+        .section-header .count {
+            font-size: 1rem;
+            font-weight: normal;
+            color: #999;
+        }
+
+        .result-card.less-relevant {
+            opacity: 0.85;
+            border-left: 4px solid #999;
+        }
+
+        .result-card.relevant {
+            border-left: 4px solid #34a853;
+        }
+
         .no-results {
             text-align: center;
             padding: 40px;
@@ -271,9 +300,14 @@
             </form>
         </div>
 
+        {% set relevant_results = results|selectattr('relevant', 'equalto', true)|list %}
+        {% set less_relevant_results = results|selectattr('relevant', 'equalto', false)|list %}
+
+        {% if relevant_results %}
+        <h2 class="section-header">Relevante vragen <span class="count">({{ relevant_results|length }})</span></h2>
         <div class="results-list">
-            {% for result in results %}
-            <div class="result-card">
+            {% for result in relevant_results %}
+            <div class="result-card relevant">
                 <div class="result-question">{{ result.question }}</div>
                 {% if result.answer %}
                 <div class="result-answer">{{ result.answer }}</div>
@@ -289,6 +323,29 @@
             </div>
             {% endfor %}
         </div>
+        {% endif %}
+
+        {% if less_relevant_results %}
+        <h2 class="section-header less-relevant">Minder relevante vragen <span class="count">({{ less_relevant_results|length }})</span></h2>
+        <div class="results-list">
+            {% for result in less_relevant_results %}
+            <div class="result-card less-relevant">
+                <div class="result-question">{{ result.question }}</div>
+                {% if result.answer %}
+                <div class="result-answer">{{ result.answer }}</div>
+                {% endif %}
+                {% if result.source_url %}
+                <div class="result-source">
+                    <strong>Bron:</strong>
+                    <a href="{{ result.source_url }}" target="_blank" rel="noopener noreferrer">
+                        {{ result.source_title or result.source_url }}
+                    </a>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
         {% endif %}
 
         {% if keyword and not results and not error %}
