@@ -10,15 +10,51 @@ app = Flask(__name__)
 SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
 
 
-def scrape_people_also_ask(keyword):
+def parse_question(item):
+    """Parse a single question item from SerpAPI response."""
+    question = item.get("question", "")
+
+    # Get answer from text_blocks (first paragraph)
+    answer = ""
+    text_blocks = item.get("text_blocks", [])
+    for block in text_blocks:
+        if block.get("type") == "paragraph" and block.get("snippet"):
+            answer = block.get("snippet", "")
+            break
+
+    # Get source from references (first reference)
+    source_title = ""
+    source_url = ""
+    references = item.get("references", [])
+    if references:
+        first_ref = references[0]
+        source_title = first_ref.get("title", "")
+        source_url = first_ref.get("link", "")
+
+    return {
+        "question": question,
+        "answer": answer,
+        "source_title": source_title,
+        "source_url": source_url,
+        "next_page_token": item.get("next_page_token", "")
+    }
+
+
+def scrape_people_also_ask(keyword, expand_questions=True, max_results=20):
     """
     Get the 'People Also Ask' section from Google.nl using SerpAPI.
     Returns a list of dictionaries with question, answer, and source information.
+
+    Args:
+        keyword: Search keyword
+        expand_questions: If True, fetch additional questions using next_page_token
+        max_results: Maximum number of results to return
     """
     if not SERPAPI_KEY:
         raise ValueError("SERPAPI_KEY environment variable not set")
 
     results = []
+    seen_questions = set()
 
     try:
         # Configure search for Dutch Google
@@ -41,33 +77,51 @@ def scrape_people_also_ask(keyword):
         if not related_questions:
             related_questions = data.get("people_also_ask", [])
 
-        for item in related_questions:
-            question = item.get("question", "")
+        # Collect tokens for expansion
+        tokens_to_expand = []
 
-            # Get answer from text_blocks (first paragraph)
-            answer = ""
-            text_blocks = item.get("text_blocks", [])
-            for block in text_blocks:
-                if block.get("type") == "paragraph" and block.get("snippet"):
-                    answer = block.get("snippet", "")
+        for item in related_questions:
+            parsed = parse_question(item)
+            if parsed["question"] and parsed["question"] not in seen_questions:
+                seen_questions.add(parsed["question"])
+                results.append({
+                    "question": parsed["question"],
+                    "answer": parsed["answer"],
+                    "source_title": parsed["source_title"],
+                    "source_url": parsed["source_url"]
+                })
+                if parsed["next_page_token"]:
+                    tokens_to_expand.append(parsed["next_page_token"])
+
+        # Expand questions to get more results (uses additional API credits)
+        if expand_questions and tokens_to_expand:
+            for token in tokens_to_expand[:3]:  # Limit to 3 expansions to save credits
+                if len(results) >= max_results:
                     break
 
-            # Get source from references (first reference)
-            source_title = ""
-            source_url = ""
-            references = item.get("references", [])
-            if references:
-                first_ref = references[0]
-                source_title = first_ref.get("title", "")
-                source_url = first_ref.get("link", "")
+                try:
+                    expand_params = {
+                        "engine": "google_related_questions",
+                        "next_page_token": token,
+                        "api_key": SERPAPI_KEY
+                    }
+                    expand_search = GoogleSearch(expand_params)
+                    expand_data = expand_search.get_dict()
 
-            if question:
-                results.append({
-                    "question": question,
-                    "answer": answer,
-                    "source_title": source_title,
-                    "source_url": source_url
-                })
+                    for item in expand_data.get("related_questions", []):
+                        if len(results) >= max_results:
+                            break
+                        parsed = parse_question(item)
+                        if parsed["question"] and parsed["question"] not in seen_questions:
+                            seen_questions.add(parsed["question"])
+                            results.append({
+                                "question": parsed["question"],
+                                "answer": parsed["answer"],
+                                "source_title": parsed["source_title"],
+                                "source_url": parsed["source_url"]
+                            })
+                except Exception:
+                    continue  # Skip failed expansions
 
     except Exception as e:
         print(f"Error during SerpAPI request: {e}")
