@@ -34,8 +34,12 @@ def scrape_people_also_ask(keyword):
         search = GoogleSearch(params)
         data = search.get_dict()
 
-        # Extract "People Also Ask" questions
+        # Extract "People Also Ask" questions (SerpAPI uses different keys)
         related_questions = data.get("related_questions", [])
+
+        # Also check "people_also_ask" key
+        if not related_questions:
+            related_questions = data.get("people_also_ask", [])
 
         for item in related_questions:
             question = item.get("question", "")
@@ -152,6 +156,44 @@ def health():
         "status": "ok",
         "serpapi_configured": bool(SERPAPI_KEY)
     })
+
+
+@app.route("/debug")
+def debug():
+    """Debug endpoint to see raw SerpAPI response."""
+    keyword = request.args.get("q", "hypotheek")
+
+    if not SERPAPI_KEY:
+        return jsonify({"error": "SERPAPI_KEY not configured"})
+
+    try:
+        params = {
+            "engine": "google",
+            "q": keyword,
+            "google_domain": "google.nl",
+            "gl": "nl",
+            "hl": "nl",
+            "api_key": SERPAPI_KEY
+        }
+
+        search = GoogleSearch(params)
+        data = search.get_dict()
+
+        # Return relevant parts of the response
+        return jsonify({
+            "keyword": keyword,
+            "has_related_questions": "related_questions" in data,
+            "has_people_also_ask": "people_also_ask" in data,
+            "related_questions_count": len(data.get("related_questions", [])),
+            "people_also_ask_count": len(data.get("people_also_ask", [])),
+            "related_questions": data.get("related_questions", []),
+            "people_also_ask": data.get("people_also_ask", []),
+            "available_keys": list(data.keys()),
+            "error": data.get("error")
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)})
 
 
 if __name__ == "__main__":
