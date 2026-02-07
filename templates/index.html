@@ -129,6 +129,15 @@
             background-color: #2d8f47;
         }
 
+        .btn-sheets {
+            background-color: #0f9d58;
+            color: white;
+        }
+
+        .btn-sheets:hover {
+            background-color: #0b8043;
+        }
+
         .btn:disabled {
             background-color: #ccc;
             cursor: not-allowed;
@@ -553,12 +562,17 @@
             <div class="results-count">
                 <strong>{{ results|length }}</strong> gerelateerde vragen gevonden voor "<strong>{{ keyword }}</strong>"
             </div>
-            <form method="POST" action="/download-csv" style="display: inline;">
-                <input type="hidden" name="keyword" value="{{ keyword }}">
-                <button type="submit" class="btn btn-secondary">
-                    Download CSV
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <form method="POST" action="/download-csv" style="display: inline;">
+                    <input type="hidden" name="keyword" value="{{ keyword }}">
+                    <button type="submit" class="btn btn-secondary">
+                        Download CSV
+                    </button>
+                </form>
+                <button type="button" class="btn btn-sheets" id="saveToSheetsBtn" onclick="saveToSheets()">
+                    Opslaan in Spreadsheet
                 </button>
-            </form>
+            </div>
         </div>
 
         {% set relevant_results = results|selectattr('relevant', 'equalto', true)|list %}
@@ -651,6 +665,28 @@
     </div>
 
     <script>
+        // Store results data for saving to sheets
+        {% if results %}
+        var resultsData = [
+            {% for result in results %}
+            {
+                "question": {{ result.question | tojson }},
+                "answer": {{ result.answer | tojson if result.answer else '""' }},
+                "generated_answer": {{ result.generated_answer | tojson if result.generated_answer else 'null' }},
+                "source_title": {{ result.source_title | tojson if result.source_title else '""' }},
+                "source_url": {{ result.source_url | tojson if result.source_url else '""' }},
+                "relevant": {{ 'true' if result.relevant else 'false' }}
+            }{% if not loop.last %},{% endif %}
+            {% endfor %}
+        ];
+        var searchKeyword = {{ keyword | tojson }};
+        var searchUrl = {{ url | tojson if url else '""' }};
+        {% else %}
+        var resultsData = [];
+        var searchKeyword = "";
+        var searchUrl = "";
+        {% endif %}
+
         document.getElementById('searchForm').addEventListener('submit', function() {
             document.getElementById('loading').classList.add('active');
             document.getElementById('submitBtn').disabled = true;
@@ -665,6 +701,60 @@
                     button.textContent = 'Kopieer antwoord';
                     button.classList.remove('copied');
                 }, 2000);
+            });
+        }
+
+        function saveToSheets() {
+            var btn = document.getElementById('saveToSheetsBtn');
+            var originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Opslaan...';
+
+            // Determine URL - for URL search use the actual URL, for keyword search prompt
+            var targetUrl = searchUrl;
+            if (!targetUrl) {
+                targetUrl = prompt('Voer de doelpagina URL in (finerbrew.com, de-koffiekompas.nl of de-baardman.nl):');
+                if (!targetUrl) {
+                    btn.disabled = false;
+                    btn.textContent = originalText;
+                    return;
+                }
+                // Add https:// if missing
+                if (!targetUrl.startsWith('http')) {
+                    targetUrl = 'https://' + targetUrl;
+                }
+            }
+
+            fetch('/api/save-to-sheets', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    url: targetUrl,
+                    keyword: searchKeyword,
+                    results: resultsData
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Fout: ' + data.error);
+                } else {
+                    btn.textContent = 'Opgeslagen!';
+                    btn.style.backgroundColor = '#666';
+                    setTimeout(function() {
+                        btn.textContent = originalText;
+                        btn.style.backgroundColor = '';
+                        btn.disabled = false;
+                    }, 2000);
+                    alert('Succesvol opgeslagen! ' + data.rows_added + ' rijen toegevoegd aan spreadsheet.');
+                }
+            })
+            .catch(error => {
+                alert('Er is een fout opgetreden: ' + error);
+                btn.disabled = false;
+                btn.textContent = originalText;
             });
         }
     </script>

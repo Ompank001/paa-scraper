@@ -2,11 +2,22 @@ import os
 import csv
 import io
 import re
+import json
+import base64
 from flask import Flask, render_template, request, Response, jsonify
 from serpapi import GoogleSearch
 import requests
 from bs4 import BeautifulSoup
 from openai import OpenAI
+from urllib.parse import urlparse
+
+# Google Sheets imports
+try:
+    import gspread
+    from google.oauth2.service_account import Credentials
+    GSPREAD_AVAILABLE = True
+except ImportError:
+    GSPREAD_AVAILABLE = False
 
 app = Flask(__name__)
 
@@ -14,10 +25,47 @@ app = Flask(__name__)
 SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
+# Google Sheets configuration
+GOOGLE_SHEETS_CREDENTIALS = os.environ.get("GOOGLE_SHEETS_CREDENTIALS", "")
+GOOGLE_SPREADSHEET_ID = os.environ.get("GOOGLE_SPREADSHEET_ID", "")
+
+# WordPress configuration for each site
+WP_SITES = {
+    "finerbrew.com": {
+        "url": os.environ.get("WP_FINERBREW_URL", "https://finerbrew.com"),
+        "user": os.environ.get("WP_FINERBREW_USER", ""),
+        "password": os.environ.get("WP_FINERBREW_APP_PASSWORD", "")
+    },
+    "de-koffiekompas.nl": {
+        "url": os.environ.get("WP_KOFFIEKOMPAS_URL", "https://de-koffiekompas.nl"),
+        "user": os.environ.get("WP_KOFFIEKOMPAS_USER", ""),
+        "password": os.environ.get("WP_KOFFIEKOMPAS_APP_PASSWORD", "")
+    },
+    "de-baardman.nl": {
+        "url": os.environ.get("WP_BAARDMAN_URL", "https://de-baardman.nl"),
+        "user": os.environ.get("WP_BAARDMAN_USER", ""),
+        "password": os.environ.get("WP_BAARDMAN_APP_PASSWORD", "")
+    }
+}
+
 # Initialize OpenAI client
 openai_client = None
 if OPENAI_API_KEY:
     openai_client = OpenAI(api_key=OPENAI_API_KEY)
+
+# Initialize Google Sheets client
+sheets_client = None
+if GSPREAD_AVAILABLE and GOOGLE_SHEETS_CREDENTIALS:
+    try:
+        creds_json = json.loads(GOOGLE_SHEETS_CREDENTIALS)
+        scopes = [
+            'https://www.googleapis.com/auth/spreadsheets',
+            'https://www.googleapis.com/auth/drive'
+        ]
+        credentials = Credentials.from_service_account_info(creds_json, scopes=scopes)
+        sheets_client = gspread.authorize(credentials)
+    except Exception as e:
+        print(f"Failed to initialize Google Sheets client: {e}")
 
 # Allowed domains for URL search
 ALLOWED_DOMAINS = ["finerbrew.com", "de-koffiekompas.nl", "de-baardman.nl"]
@@ -213,6 +261,184 @@ def is_relevant_question(question, keyword):
 
     # Default: if doesn't contain keyword, less relevant
     return contains_keyword
+
+
+def get_domain_from_url(url):
+    """Extract domain from URL, removing www. prefix."""
+    parsed = urlparse(url)
+    domain = parsed.netloc.replace("www.", "")
+    return domain
+
+
+def get_sheet_for_domain(domain):
+    """Get the appropriate sheet/tab for a domain."""
+    if not sheets_client or not GOOGLE_SPREADSHEET_ID:
+        return None
+
+    try:
+        spreadsheet = sheets_client.open_by_key(GOOGLE_SPREADSHEET_ID)
+
+        # Try to get existing sheet for this domain
+        try:
+            sheet = spreadsheet.worksheet(domain)
+        except gspread.WorksheetNotFound:
+            # Create new sheet with headers
+            sheet = spreadsheet.add_worksheet(title=domain, rows=1000, cols=10)
+            sheet.append_row(["URL", "keyword", "PAA", "answer", "publish", "status"])
+
+        return sheet
+    except Exception as e:
+        print(f"Error getting sheet for domain {domain}: {e}")
+        return None
+
+
+def save_results_to_sheets(url, keyword, results):
+    """
+    Save PAA results to Google Sheets.
+
+    Args:
+        url: The source URL for these results
+        keyword: The search keyword used
+        results: List of PAA results with question, answer, generated_answer
+
+    Returns:
+        Number of rows added, or error message
+    """
+    if not sheets_client:
+        return {"error": "Google Sheets not configured"}
+
+    domain = get_domain_from_url(url) if url else None
+    if not domain or domain not in ALLOWED_DOMAINS:
+        return {"error": f"Domain not allowed: {domain}"}
+
+    sheet = get_sheet_for_domain(domain)
+    if not sheet:
+        return {"error": "Could not access spreadsheet"}
+
+    rows_added = 0
+    try:
+        for result in results:
+            question = result.get("question", "")
+            # Use generated answer if available, otherwise use scraped answer
+            answer = result.get("generated_answer") or result.get("answer", "")
+
+            row = [url, keyword, question, answer, "", ""]  # publish and status empty
+            sheet.append_row(row)
+            rows_added += 1
+
+        return {"success": True, "rows_added": rows_added}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def get_wp_credentials(domain):
+    """Get WordPress credentials for a domain."""
+    domain_clean = domain.replace("www.", "")
+    if domain_clean in WP_SITES:
+        site = WP_SITES[domain_clean]
+        if site["user"] and site["password"]:
+            return site
+    return None
+
+
+def find_wp_page_by_url(page_url, wp_site):
+    """
+    Find a WordPress page/post by its URL.
+    Returns the page/post ID and type if found.
+    """
+    parsed = urlparse(page_url)
+    slug = parsed.path.strip("/").split("/")[-1]  # Get the last part of the path
+
+    if not slug:
+        return None
+
+    # Create auth header
+    auth_string = f"{wp_site['user']}:{wp_site['password']}"
+    auth_bytes = base64.b64encode(auth_string.encode()).decode()
+    headers = {
+        "Authorization": f"Basic {auth_bytes}",
+        "Content-Type": "application/json"
+    }
+
+    api_base = f"{wp_site['url']}/wp-json/wp/v2"
+
+    # Try to find as page first
+    try:
+        response = requests.get(f"{api_base}/pages?slug={slug}", headers=headers, timeout=10)
+        if response.status_code == 200:
+            pages = response.json()
+            if pages:
+                return {"id": pages[0]["id"], "type": "pages", "content": pages[0]["content"]["rendered"]}
+    except Exception:
+        pass
+
+    # Try to find as post
+    try:
+        response = requests.get(f"{api_base}/posts?slug={slug}", headers=headers, timeout=10)
+        if response.status_code == 200:
+            posts = response.json()
+            if posts:
+                return {"id": posts[0]["id"], "type": "posts", "content": posts[0]["content"]["rendered"]}
+    except Exception:
+        pass
+
+    return None
+
+
+def publish_to_wordpress(page_url, question, answer):
+    """
+    Publish a PAA question and answer to a WordPress page.
+    Appends the content at the bottom of the existing page.
+
+    Args:
+        page_url: URL of the WordPress page to update
+        question: The FAQ question (will be H2)
+        answer: The FAQ answer (will be paragraph)
+
+    Returns:
+        Success/error dict
+    """
+    domain = get_domain_from_url(page_url)
+    wp_site = get_wp_credentials(domain)
+
+    if not wp_site:
+        return {"error": f"WordPress not configured for domain: {domain}"}
+
+    # Find the page
+    page_info = find_wp_page_by_url(page_url, wp_site)
+    if not page_info:
+        return {"error": f"Page not found: {page_url}"}
+
+    # Create new content to append
+    faq_html = f"\n\n<h2>{question}</h2>\n<p>{answer}</p>"
+
+    # Append to existing content
+    new_content = page_info["content"] + faq_html
+
+    # Update the page
+    auth_string = f"{wp_site['user']}:{wp_site['password']}"
+    auth_bytes = base64.b64encode(auth_string.encode()).decode()
+    headers = {
+        "Authorization": f"Basic {auth_bytes}",
+        "Content-Type": "application/json"
+    }
+
+    api_url = f"{wp_site['url']}/wp-json/wp/v2/{page_info['type']}/{page_info['id']}"
+
+    try:
+        response = requests.post(
+            api_url,
+            headers=headers,
+            json={"content": new_content},
+            timeout=30
+        )
+
+        if response.status_code == 200:
+            return {"success": True, "page_id": page_info["id"]}
+        else:
+            return {"error": f"WordPress API error: {response.status_code} - {response.text}"}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 def parse_question(item, keyword="", generate_ai_answer=False):
@@ -559,6 +785,94 @@ def debug():
 
     except Exception as e:
         return jsonify({"error": str(e)})
+
+
+@app.route("/api/save-to-sheets", methods=["POST"])
+def api_save_to_sheets():
+    """
+    Save PAA results to Google Sheets.
+    Expects JSON with: url, keyword, results (array)
+    """
+    if not sheets_client:
+        return jsonify({"error": "Google Sheets not configured. Set GOOGLE_SHEETS_CREDENTIALS and GOOGLE_SPREADSHEET_ID."}), 500
+
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+
+    url = data.get("url", "")
+    keyword = data.get("keyword", "")
+    results = data.get("results", [])
+
+    if not url:
+        return jsonify({"error": "URL is required"}), 400
+    if not keyword:
+        return jsonify({"error": "Keyword is required"}), 400
+    if not results:
+        return jsonify({"error": "No results to save"}), 400
+
+    result = save_results_to_sheets(url, keyword, results)
+
+    if "error" in result:
+        return jsonify(result), 500
+
+    return jsonify(result)
+
+
+@app.route("/api/publish", methods=["POST"])
+def api_publish():
+    """
+    Publish a PAA question/answer to WordPress.
+    Called by Google Apps Script when publish is set to 'Yes'.
+
+    Expects JSON with: url, question, answer
+    Returns: success/error status
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+
+    url = data.get("url", "")
+    question = data.get("question", "")
+    answer = data.get("answer", "")
+
+    if not url:
+        return jsonify({"error": "URL is required"}), 400
+    if not question:
+        return jsonify({"error": "Question is required"}), 400
+    if not answer:
+        return jsonify({"error": "Answer is required"}), 400
+
+    result = publish_to_wordpress(url, question, answer)
+
+    if "error" in result:
+        return jsonify(result), 500
+
+    return jsonify(result)
+
+
+@app.route("/api/sheets-status")
+def api_sheets_status():
+    """Check Google Sheets configuration status."""
+    return jsonify({
+        "gspread_available": GSPREAD_AVAILABLE,
+        "credentials_configured": bool(GOOGLE_SHEETS_CREDENTIALS),
+        "spreadsheet_id_configured": bool(GOOGLE_SPREADSHEET_ID),
+        "sheets_client_ready": sheets_client is not None
+    })
+
+
+@app.route("/api/wp-status")
+def api_wp_status():
+    """Check WordPress configuration status for all sites."""
+    status = {}
+    for domain, config in WP_SITES.items():
+        status[domain] = {
+            "url": config["url"],
+            "user_configured": bool(config["user"]),
+            "password_configured": bool(config["password"])
+        }
+    return jsonify(status)
 
 
 if __name__ == "__main__":
