@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>People Also Ask Scraper - Nederlandse FAQs</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background-color: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 20px;
+        }
+
+        h1 {
+            color: #1a73e8;
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #666;
+            font-size: 1rem;
+        }
+
+        .search-form {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+
+        .form-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .keyword-input {
+            flex: 1;
+            min-width: 200px;
+            padding: 15px 20px;
+            font-size: 1rem;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+
+        .keyword-input:focus {
+            border-color: #1a73e8;
+        }
+
+        .btn {
+            padding: 15px 30px;
+            font-size: 1rem;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background-color: #1a73e8;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: #1557b0;
+        }
+
+        .btn-secondary {
+            background-color: #34a853;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background-color: #2d8f47;
+        }
+
+        .btn:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #1a73e8;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            background-color: #fce8e6;
+            color: #c5221f;
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .results-count {
+            font-size: 1.1rem;
+            color: #666;
+        }
+
+        .results-count strong {
+            color: #1a73e8;
+        }
+
+        .results-list {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .result-card {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .result-question {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #1a73e8;
+            margin-bottom: 10px;
+        }
+
+        .result-answer {
+            color: #333;
+            margin-bottom: 15px;
+            line-height: 1.7;
+        }
+
+        .result-source {
+            font-size: 0.9rem;
+            color: #666;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+        }
+
+        .result-source a {
+            color: #1a73e8;
+            text-decoration: none;
+        }
+
+        .result-source a:hover {
+            text-decoration: underline;
+        }
+
+        .no-results {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 40px;
+            padding: 20px;
+            color: #999;
+            font-size: 0.9rem;
+        }
+
+        @media (max-width: 600px) {
+            .form-group {
+                flex-direction: column;
+            }
+
+            .btn {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>People Also Ask Scraper</h1>
+            <p class="subtitle">Vind gerelateerde vragen van Google.nl voor jouw zoekwoord</p>
+        </header>
+
+        <div class="search-form">
+            <form method="POST" action="/" id="searchForm">
+                <div class="form-group">
+                    <input
+                        type="text"
+                        name="keyword"
+                        class="keyword-input"
+                        placeholder="Voer een zoekwoord in..."
+                        value="{{ keyword }}"
+                        required
+                        autocomplete="off"
+                    >
+                    <button type="submit" class="btn btn-primary" id="submitBtn">
+                        Start
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Even geduld, we zoeken naar gerelateerde vragen...</p>
+        </div>
+
+        {% if error %}
+        <div class="error">
+            {{ error }}
+        </div>
+        {% endif %}
+
+        {% if results %}
+        <div class="results-header">
+            <div class="results-count">
+                <strong>{{ results|length }}</strong> gerelateerde vragen gevonden voor "<strong>{{ keyword }}</strong>"
+            </div>
+            <form method="POST" action="/download-csv" style="display: inline;">
+                <input type="hidden" name="keyword" value="{{ keyword }}">
+                <button type="submit" class="btn btn-secondary">
+                    Download CSV
+                </button>
+            </form>
+        </div>
+
+        <div class="results-list">
+            {% for result in results %}
+            <div class="result-card">
+                <div class="result-question">{{ result.question }}</div>
+                {% if result.answer %}
+                <div class="result-answer">{{ result.answer }}</div>
+                {% endif %}
+                {% if result.source_url %}
+                <div class="result-source">
+                    <strong>Bron:</strong>
+                    <a href="{{ result.source_url }}" target="_blank" rel="noopener noreferrer">
+                        {{ result.source_title or result.source_url }}
+                    </a>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if keyword and not results and not error %}
+        <div class="no-results">
+            <p>Geen resultaten gevonden voor "{{ keyword }}"</p>
+        </div>
+        {% endif %}
+
+        <footer>
+            <p>People Also Ask Scraper - Target: Google.nl (Nederlands)</p>
+        </footer>
+    </div>
+
+    <script>
+        document.getElementById('searchForm').addEventListener('submit', function() {
+            document.getElementById('loading').classList.add('active');
+            document.getElementById('submitBtn').disabled = true;
+            document.getElementById('submitBtn').textContent = 'Zoeken...';
+        });
+    </script>
+</body>
+</html>
