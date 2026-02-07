@@ -1,13 +1,109 @@
 import os
 import csv
 import io
+import re
 from flask import Flask, render_template, request, Response, jsonify
 from serpapi import GoogleSearch
+import requests
+from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 
 # Get API key from environment variable
 SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
+
+# Allowed domains for URL search
+ALLOWED_DOMAINS = ["finerbrew.com", "de-koffiekompas.nl", "de-baardman.nl"]
+
+
+def extract_page_info(url):
+    """
+    Extract H1 header and meta title from a URL.
+    Returns a dictionary with h1, meta_title, and extracted keyword.
+    """
+    try:
+        # Validate URL domain
+        from urllib.parse import urlparse
+        parsed_url = urlparse(url)
+        domain = parsed_url.netloc.replace("www.", "")
+
+        if domain not in ALLOWED_DOMAINS:
+            raise ValueError(f"Domein niet toegestaan. Gebruik alleen: {', '.join(ALLOWED_DOMAINS)}")
+
+        # Fetch the page
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+        }
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+
+        # Parse HTML
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        # Extract H1
+        h1_tag = soup.find("h1")
+        h1_text = h1_tag.get_text(strip=True) if h1_tag else ""
+
+        # Extract meta title
+        title_tag = soup.find("title")
+        meta_title = title_tag.get_text(strip=True) if title_tag else ""
+
+        # Also try og:title as fallback
+        og_title_tag = soup.find("meta", property="og:title")
+        og_title = og_title_tag.get("content", "") if og_title_tag else ""
+
+        # Determine main keyword
+        keyword = determine_main_keyword(h1_text, meta_title, og_title)
+
+        return {
+            "h1": h1_text,
+            "meta_title": meta_title,
+            "og_title": og_title,
+            "keyword": keyword,
+            "url": url
+        }
+
+    except requests.RequestException as e:
+        raise ValueError(f"Kon de URL niet ophalen: {str(e)}")
+    except Exception as e:
+        raise ValueError(f"Fout bij verwerken URL: {str(e)}")
+
+
+def determine_main_keyword(h1, meta_title, og_title=""):
+    """
+    Determine the main keyword from H1 and meta title.
+    Priority: H1 > meta title > og:title
+    Cleans up common patterns like "| Site Name" from titles.
+    """
+    # Clean up meta title (remove site name after | or -)
+    clean_title = meta_title
+    for separator in [" | ", " - ", " – ", " — "]:
+        if separator in clean_title:
+            clean_title = clean_title.split(separator)[0].strip()
+
+    # Priority: H1 if it's meaningful, otherwise cleaned title
+    if h1 and len(h1) > 3:
+        keyword = h1
+    elif clean_title and len(clean_title) > 3:
+        keyword = clean_title
+    elif og_title and len(og_title) > 3:
+        keyword = og_title
+    else:
+        keyword = meta_title
+
+    # Clean up the keyword
+    # Remove common prefixes/suffixes
+    keyword = keyword.strip()
+
+    # Remove numbering like "Top 10", "5 beste"
+    keyword = re.sub(r"^(top\s*)?\d+\s+", "", keyword, flags=re.IGNORECASE)
+
+    # Limit length (Google works better with shorter queries)
+    words = keyword.split()
+    if len(words) > 6:
+        keyword = " ".join(words[:6])
+
+    return keyword.strip()
 
 
 def is_relevant_question(question, keyword):
@@ -202,7 +298,57 @@ def index():
             except Exception as e:
                 error = f"Er is een fout opgetreden: {str(e)}"
 
-    return render_template("index.html", results=results, keyword=keyword, error=error)
+    return render_template("index.html", results=results, keyword=keyword, error=error, active_tab="keyword")
+
+
+@app.route("/url", methods=["GET", "POST"])
+def url_search():
+    """URL-based search: extract keyword from page and search PAA."""
+    results = None
+    url = ""
+    keyword = ""
+    page_info = None
+    error = None
+
+    if request.method == "POST":
+        url = request.form.get("url", "").strip()
+
+        if not url:
+            error = "Vul een URL in."
+        elif not SERPAPI_KEY:
+            error = "SERPAPI_KEY is niet geconfigureerd."
+        else:
+            # Add https:// if missing
+            if not url.startswith("http"):
+                url = "https://" + url
+
+            try:
+                # Extract page info
+                page_info = extract_page_info(url)
+                keyword = page_info["keyword"]
+
+                if not keyword:
+                    error = "Kon geen zoekwoord bepalen uit de pagina."
+                else:
+                    # Search PAA with extracted keyword
+                    results = scrape_people_also_ask(keyword)
+                    if not results:
+                        error = "Geen 'Mensen vragen ook' vragen gevonden voor dit zoekwoord."
+
+            except ValueError as e:
+                error = str(e)
+            except Exception as e:
+                error = f"Er is een fout opgetreden: {str(e)}"
+
+    return render_template(
+        "index.html",
+        results=results,
+        keyword=keyword,
+        url=url,
+        page_info=page_info,
+        error=error,
+        active_tab="url"
+    )
 
 
 @app.route("/download-csv", methods=["POST"])
