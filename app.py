@@ -43,16 +43,30 @@ def scrape_people_also_ask(keyword):
 
         for item in related_questions:
             question = item.get("question", "")
-            snippet = item.get("snippet", "")
-            title = item.get("title", "")
-            link = item.get("link", "")
+
+            # Get answer from text_blocks (first paragraph)
+            answer = ""
+            text_blocks = item.get("text_blocks", [])
+            for block in text_blocks:
+                if block.get("type") == "paragraph" and block.get("snippet"):
+                    answer = block.get("snippet", "")
+                    break
+
+            # Get source from references (first reference)
+            source_title = ""
+            source_url = ""
+            references = item.get("references", [])
+            if references:
+                first_ref = references[0]
+                source_title = first_ref.get("title", "")
+                source_url = first_ref.get("link", "")
 
             if question:
                 results.append({
                     "question": question,
-                    "answer": snippet,
-                    "source_title": title,
-                    "source_url": link
+                    "answer": answer,
+                    "source_title": source_title,
+                    "source_url": source_url
                 })
 
     except Exception as e:
