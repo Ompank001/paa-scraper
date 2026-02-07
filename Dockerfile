@@ -1,4 +1,5 @@
 # Use Python slim image as base
+# Updated: Force rebuild with modern GPG key method
 FROM python:3.11-slim
 
 # Set environment variables
