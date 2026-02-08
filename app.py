@@ -55,6 +55,7 @@ if OPENAI_API_KEY:
 
 # Initialize Google Sheets client
 sheets_client = None
+sheets_init_error = None
 if GSPREAD_AVAILABLE and GOOGLE_SHEETS_CREDENTIALS:
     try:
         creds_json = json.loads(GOOGLE_SHEETS_CREDENTIALS)
@@ -65,6 +66,7 @@ if GSPREAD_AVAILABLE and GOOGLE_SHEETS_CREDENTIALS:
         credentials = Credentials.from_service_account_info(creds_json, scopes=scopes)
         sheets_client = gspread.authorize(credentials)
     except Exception as e:
+        sheets_init_error = str(e)
         print(f"Failed to initialize Google Sheets client: {e}")
 
 # Allowed domains for URL search
@@ -876,7 +878,8 @@ def api_sheets_status():
         "json_error": json_error,
         "spreadsheet_id_configured": bool(GOOGLE_SPREADSHEET_ID),
         "spreadsheet_id": GOOGLE_SPREADSHEET_ID[:10] + "..." if GOOGLE_SPREADSHEET_ID else "",
-        "sheets_client_ready": sheets_client is not None
+        "sheets_client_ready": sheets_client is not None,
+        "sheets_init_error": sheets_init_error
     })
 
 
