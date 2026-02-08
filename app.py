@@ -854,10 +854,28 @@ def api_publish():
 @app.route("/api/sheets-status")
 def api_sheets_status():
     """Check Google Sheets configuration status."""
+    # Get raw env var for debugging
+    raw_creds = os.environ.get("GOOGLE_SHEETS_CREDENTIALS", "")
+
+    # Try to parse JSON to see if that's the issue
+    json_valid = False
+    json_error = None
+    if raw_creds:
+        try:
+            json.loads(raw_creds)
+            json_valid = True
+        except Exception as e:
+            json_error = str(e)
+
     return jsonify({
         "gspread_available": GSPREAD_AVAILABLE,
         "credentials_configured": bool(GOOGLE_SHEETS_CREDENTIALS),
+        "credentials_length": len(raw_creds) if raw_creds else 0,
+        "credentials_starts_with": raw_creds[:20] if raw_creds else "",
+        "json_valid": json_valid,
+        "json_error": json_error,
         "spreadsheet_id_configured": bool(GOOGLE_SPREADSHEET_ID),
+        "spreadsheet_id": GOOGLE_SPREADSHEET_ID[:10] + "..." if GOOGLE_SPREADSHEET_ID else "",
         "sheets_client_ready": sheets_client is not None
     })
 
