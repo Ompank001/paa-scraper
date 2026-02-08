@@ -258,6 +258,18 @@
             100% { transform: rotate(360deg); }
         }
 
+        .spinner-inline {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top: 2px solid white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            vertical-align: middle;
+            margin-right: 6px;
+        }
+
         .error {
             background-color: #fce8e6;
             color: #c5221f;
@@ -708,7 +720,8 @@
             var btn = document.getElementById('saveToSheetsBtn');
             var originalText = btn.textContent;
             btn.disabled = true;
-            btn.textContent = 'Opslaan...';
+            btn.innerHTML = '<span class="spinner-inline"></span> Bezig met opslaan...';
+            btn.style.backgroundColor = '#f0ad4e';
 
             // Determine URL - for URL search use the actual URL, for keyword search prompt
             var targetUrl = searchUrl;
@@ -717,6 +730,7 @@
                 if (!targetUrl) {
                     btn.disabled = false;
                     btn.textContent = originalText;
+                    btn.style.backgroundColor = '';
                     return;
                 }
                 // Add https:// if missing
@@ -739,22 +753,33 @@
             .then(response => response.json())
             .then(data => {
                 if (data.error) {
-                    alert('Fout: ' + data.error);
-                } else {
-                    btn.textContent = 'Opgeslagen!';
-                    btn.style.backgroundColor = '#666';
+                    btn.innerHTML = 'Fout!';
+                    btn.style.backgroundColor = '#dc3545';
                     setTimeout(function() {
                         btn.textContent = originalText;
                         btn.style.backgroundColor = '';
                         btn.disabled = false;
-                    }, 2000);
-                    alert('Succesvol opgeslagen! ' + data.rows_added + ' rijen toegevoegd aan spreadsheet.');
+                    }, 3000);
+                    alert('Fout: ' + data.error);
+                } else {
+                    btn.innerHTML = '<span style="color: white;">&#10003;</span> Finished! (' + data.rows_added + ' rijen)';
+                    btn.style.backgroundColor = '#28a745';
+                    setTimeout(function() {
+                        btn.textContent = originalText;
+                        btn.style.backgroundColor = '';
+                        btn.disabled = false;
+                    }, 3000);
                 }
             })
             .catch(error => {
+                btn.innerHTML = 'Fout!';
+                btn.style.backgroundColor = '#dc3545';
+                setTimeout(function() {
+                    btn.textContent = originalText;
+                    btn.style.backgroundColor = '';
+                    btn.disabled = false;
+                }, 3000);
                 alert('Er is een fout opgetreden: ' + error);
-                btn.disabled = false;
-                btn.textContent = originalText;
             });
         }
     </script>
