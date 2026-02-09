@@ -581,7 +581,7 @@
                         Download CSV
                     </button>
                 </form>
-                <button type="button" class="btn btn-sheets" id="saveToSheetsBtn" onclick="saveToSheets()">
+                <button type="button" class="btn btn-sheets" id="saveToSheetsBtn">
                     Opslaan in Spreadsheet
                 </button>
             </div>
@@ -601,7 +601,7 @@
                 <div class="generated-answer">
                     <div class="generated-answer-label">Gegenereerd antwoord (AI)</div>
                     <div class="generated-answer-text">{{ result.generated_answer }}</div>
-                    <button class="copy-btn" onclick="copyToClipboard(this, `{{ result.generated_answer | replace('`', '\\`') | replace('\n', ' ') }}`)">
+                    <button class="copy-btn" data-copy-text="{{ result.generated_answer | replace('\n', ' ') }}">
                         Kopieer antwoord
                     </button>
                 </div>
@@ -638,7 +638,7 @@
                 <div class="generated-answer">
                     <div class="generated-answer-label">Gegenereerd antwoord (AI)</div>
                     <div class="generated-answer-text">{{ result.generated_answer }}</div>
-                    <button class="copy-btn" onclick="copyToClipboard(this, `{{ result.generated_answer | replace('`', '\\`') | replace('\n', ' ') }}`)">
+                    <button class="copy-btn" data-copy-text="{{ result.generated_answer | replace('\n', ' ') }}">
                         Kopieer antwoord
                     </button>
                 </div>
@@ -705,7 +705,19 @@
             document.getElementById('submitBtn').textContent = 'Bezig...';
         });
 
-        function copyToClipboard(button, text) {
+        // Attach event listener to save button if it exists
+        var saveBtn = document.getElementById('saveToSheetsBtn');
+        if (saveBtn) {
+            saveBtn.addEventListener('click', saveToSheets);
+            console.log('Save button listener attached');
+        }
+
+        function copyToClipboard(button) {
+            var text = button.getAttribute('data-copy-text');
+            if (!text) {
+                console.error('No text to copy');
+                return;
+            }
             navigator.clipboard.writeText(text).then(function() {
                 button.textContent = 'Gekopieerd!';
                 button.classList.add('copied');
@@ -713,11 +725,32 @@
                     button.textContent = 'Kopieer antwoord';
                     button.classList.remove('copied');
                 }, 2000);
+            }).catch(function(error) {
+                console.error('Copy failed:', error);
+                alert('Kopiëren mislukt');
             });
         }
 
+        // Event delegation for copy buttons
+        document.addEventListener('click', function(e) {
+            if (e.target && e.target.classList.contains('copy-btn')) {
+                copyToClipboard(e.target);
+            }
+        });
+
         function saveToSheets() {
+            console.log('saveToSheets called');
             var btn = document.getElementById('saveToSheetsBtn');
+
+            if (!btn) {
+                console.error('Button not found!');
+                return;
+            }
+
+            console.log('Results data:', resultsData);
+            console.log('Keyword:', searchKeyword);
+            console.log('URL:', searchUrl);
+
             var originalText = btn.textContent;
             btn.disabled = true;
             btn.innerHTML = '<span class="spinner-inline"></span> Bezig met opslaan...';
@@ -728,6 +761,7 @@
             if (!targetUrl) {
                 targetUrl = prompt('Voer de doelpagina URL in (finerbrew.com, de-koffiekompas.nl of de-baardman.nl):');
                 if (!targetUrl) {
+                    console.log('No URL provided, canceling');
                     btn.disabled = false;
                     btn.textContent = originalText;
                     btn.style.backgroundColor = '';
@@ -738,6 +772,8 @@
                     targetUrl = 'https://' + targetUrl;
                 }
             }
+
+            console.log('Sending to /api/save-to-sheets with URL:', targetUrl);
 
             fetch('/api/save-to-sheets', {
                 method: 'POST',
@@ -750,8 +786,12 @@
                     results: resultsData
                 })
             })
-            .then(response => response.json())
+            .then(response => {
+                console.log('Response status:', response.status);
+                return response.json();
+            })
             .then(data => {
+                console.log('Response data:', data);
                 if (data.error) {
                     btn.innerHTML = 'Fout!';
                     btn.style.backgroundColor = '#dc3545';
@@ -772,6 +812,7 @@
                 }
             })
             .catch(error => {
+                console.error('Fetch error:', error);
                 btn.innerHTML = 'Fout!';
                 btn.style.backgroundColor = '#dc3545';
                 setTimeout(function() {
