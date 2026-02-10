@@ -679,24 +679,13 @@
     <script>
         // Store results data for saving to sheets
         {% if results %}
-        var resultsData = [
-            {% for result in results %}
-            {
-                "question": {{ result.question | tojson }},
-                "answer": {{ result.answer | tojson if result.answer else '""' }},
-                "generated_answer": {{ result.generated_answer | tojson if result.generated_answer else 'null' }},
-                "source_title": {{ result.source_title | tojson if result.source_title else '""' }},
-                "source_url": {{ result.source_url | tojson if result.source_url else '""' }},
-                "relevant": {{ 'true' if result.relevant else 'false' }}
-            }{% if not loop.last %},{% endif %}
-            {% endfor %}
-        ];
-        var searchKeyword = {{ keyword | tojson }};
-        var searchUrl = {{ url | tojson if url else '""' }};
+        var resultsData = {{ results | tojson | safe }};
+        var searchKeyword = {{ keyword | tojson | safe }};
+        var searchUrl = {{ url | tojson | safe if url else 'null' }};
         {% else %}
         var resultsData = [];
         var searchKeyword = "";
-        var searchUrl = "";
+        var searchUrl = null;
         {% endif %}
 
         // Initialize immediately (script is at bottom so DOM is already ready)
