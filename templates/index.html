@@ -699,25 +699,24 @@
         var searchUrl = "";
         {% endif %}
 
-        // Wait for DOM to be fully loaded
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('DOM loaded');
+        // Initialize immediately (script is at bottom so DOM is already ready)
+        console.log('Script loaded, DOM state:', document.readyState);
 
-            document.getElementById('searchForm').addEventListener('submit', function() {
-                document.getElementById('loading').classList.add('active');
-                document.getElementById('submitBtn').disabled = true;
-                document.getElementById('submitBtn').textContent = 'Bezig...';
-            });
-
-            // Attach event listener to save button if it exists
-            var saveBtn = document.getElementById('saveToSheetsBtn');
-            if (saveBtn) {
-                saveBtn.addEventListener('click', saveToSheets);
-                console.log('Save button listener attached');
-            } else {
-                console.log('Save button not found on page');
-            }
+        document.getElementById('searchForm').addEventListener('submit', function() {
+            document.getElementById('loading').classList.add('active');
+            document.getElementById('submitBtn').disabled = true;
+            document.getElementById('submitBtn').textContent = 'Bezig...';
         });
+
+        // Attach event listener to save button if it exists
+        var saveBtn = document.getElementById('saveToSheetsBtn');
+        console.log('Looking for save button, found:', saveBtn);
+        if (saveBtn) {
+            saveBtn.addEventListener('click', saveToSheets);
+            console.log('Save button listener attached successfully');
+        } else {
+            console.log('Save button not found on page - no results displayed yet?');
+        }
 
         function copyToClipboard(button) {
             var text = button.getAttribute('data-copy-text');
