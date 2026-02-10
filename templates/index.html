@@ -699,18 +699,25 @@
         var searchUrl = "";
         {% endif %}
 
-        document.getElementById('searchForm').addEventListener('submit', function() {
-            document.getElementById('loading').classList.add('active');
-            document.getElementById('submitBtn').disabled = true;
-            document.getElementById('submitBtn').textContent = 'Bezig...';
-        });
+        // Wait for DOM to be fully loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded');
 
-        // Attach event listener to save button if it exists
-        var saveBtn = document.getElementById('saveToSheetsBtn');
-        if (saveBtn) {
-            saveBtn.addEventListener('click', saveToSheets);
-            console.log('Save button listener attached');
-        }
+            document.getElementById('searchForm').addEventListener('submit', function() {
+                document.getElementById('loading').classList.add('active');
+                document.getElementById('submitBtn').disabled = true;
+                document.getElementById('submitBtn').textContent = 'Bezig...';
+            });
+
+            // Attach event listener to save button if it exists
+            var saveBtn = document.getElementById('saveToSheetsBtn');
+            if (saveBtn) {
+                saveBtn.addEventListener('click', saveToSheets);
+                console.log('Save button listener attached');
+            } else {
+                console.log('Save button not found on page');
+            }
+        });
 
         function copyToClipboard(button) {
             var text = button.getAttribute('data-copy-text');
