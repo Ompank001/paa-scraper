@@ -167,52 +167,85 @@ def generate_answer(question, context=""):
     """
     Generate a well-formatted answer for a FAQ question using OpenAI.
 
-    Rules:
-    1. Answer starts with the question reformulated
-    2. Maximum 75 words
-    3. Informal "wij" form, informative and expert-like
+    Follows strict PAA writing rules:
+    - Direct answer first (1-2 sentences)
+    - 40-120 words
+    - Neutral, factual tone
+    - No first-person, no opinions
+    - Clear, simple language
     """
     if not openai_client:
         return None
 
     try:
-        prompt = f"""Je bent een deskundige content schrijver voor een Nederlandse blog.
-Beantwoord de volgende vraag volgens deze regels:
+        prompt = f"""Je bent een professionele content schrijver. Beantwoord de vraag volgens deze strikte regels:
 
-1. Begin het antwoord met de vraagstelling omgevormd tot een zin.
-   Bijvoorbeeld: Vraag "Wat is de beste koffiemachine?" → Antwoord begint met "De beste koffiemachine is..."
-   Vraag "Hoeveel kost een espressomachine?" → Antwoord begint met "Een espressomachine kost..."
+MANDATORY RULES:
 
-2. Maximaal 75 woorden
+1. DIRECT ANSWER FIRST
+   - De eerste 1-2 zinnen moeten de vraag direct en duidelijk beantwoorden
+   - Herformuleer de vraag natuurlijk in het antwoord
+   - Geen introductie, context-setting, of conclusie
+   - Voorbeeld: Vraag "Wat is de beste koffiemachine?" → "De beste koffiemachine is..."
 
-3. Schrijf in de wij-vorm (bijv. "Wij raden aan...", "Volgens ons...")
+2. CLARITY & SIMPLICITY
+   - Gebruik korte, duidelijke zinnen
+   - Gebruik simpel, alledaags Nederlands
+   - Vermijd jargon tenzij essentieel
+   - Leesniveau: algemeen publiek (duidelijk, neutraal, niet-academisch)
 
-4. Houd het informatief en deskundig, maar niet te formeel
+3. LENGTH CONTROL
+   - Doellengte: 40-120 woorden
+   - Verwijder redundantie en opvulling
+   - Vul het antwoord niet op om lengte te bereiken
 
-5. Geef praktisch en nuttig advies
+4. NEUTRAL AUTHORITY
+   - Schrijf in een feitelijke, kalme, zelfverzekerde toon
+   - GEEN eerste persoon ("ik", "wij", "ons")
+   - GEEN meningen, hype, of verkooptaal
+   - Alleen feiten en nuttige informatie
+
+5. AI-CITATION FRIENDLY
+   - Schrijf in complete, op zichzelf staande statements
+   - Vermijd vage verwijzingen ("dit", "dat", "zoals hierboven genoemd")
+   - Het antwoord moet logisch zijn als het buiten context wordt gelezen
+
+6. FORMATTING
+   - Standaard: gewone paragrafen
+   - Geen emojis
+   - Geen koppen
+
+7. SEO & PAA ALIGNMENT
+   - Include natuurlijk de kernvraag of een variant
+   - Forceer geen exact-match keywords
+   - Vermijd onnatuurlijke herhaling
+
+8. ORIGINALITY
+   - Vermijd generieke zinnen die veel voorkomen
+   - Voeg duidelijkheid of nuance toe waar mogelijk
 
 Vraag: {question}
 
-{f"Context/achtergrond informatie: {context}" if context else ""}
+{f"Referentie-informatie: {context}" if context else ""}
 
-Antwoord:"""
+Antwoord (40-120 woorden, direct, neutraal, zonder eerste persoon):"""
 
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "Je bent een deskundige Nederlandse content schrijver die informatieve, beknopte antwoorden geeft."},
+                {"role": "system", "content": "Je bent een professionele Nederlandse content schrijver die directe, feitelijke, neutrale antwoorden geeft zonder eerste persoon."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=150,
-            temperature=0.7
+            max_tokens=200,
+            temperature=0.5
         )
 
         answer = response.choices[0].message.content.strip()
 
-        # Ensure answer doesn't exceed 75 words
+        # Ensure answer is within 40-120 words
         words = answer.split()
-        if len(words) > 75:
-            answer = " ".join(words[:75]) + "..."
+        if len(words) > 120:
+            answer = " ".join(words[:120]) + "..."
 
         return answer
 
