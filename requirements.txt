@@ -6,3 +6,5 @@ beautifulsoup4==4.12.2
 openai>=1.30.0
 gspread>=6.0.0
 google-auth>=2.25.0
+anthropic>=0.40.0
+lxml>=4.9.0

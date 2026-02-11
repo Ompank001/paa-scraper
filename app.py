@@ -4,12 +4,21 @@ import io
 import re
 import json
 import base64
+import asyncio
 from flask import Flask, render_template, request, Response, jsonify
 from serpapi import GoogleSearch
 import requests
 from bs4 import BeautifulSoup
 from openai import OpenAI
 from urllib.parse import urlparse
+
+# Import ranking extractor
+try:
+    from extractor import extract_products, fetch_and_clean
+    EXTRACTOR_AVAILABLE = True
+except ImportError:
+    EXTRACTOR_AVAILABLE = False
+    print("Warning: Ranking extractor not available")
 
 # Google Sheets imports
 try:
@@ -24,6 +33,7 @@ app = Flask(__name__)
 # Get API keys from environment variables
 SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 # Google Sheets configuration
 GOOGLE_SHEETS_CREDENTIALS = os.environ.get("GOOGLE_SHEETS_CREDENTIALS", "")
@@ -72,27 +82,26 @@ if GSPREAD_AVAILABLE and GOOGLE_SHEETS_CREDENTIALS:
 # Allowed domains for URL search
 ALLOWED_DOMAINS = ["finerbrew.com", "de-koffiekompas.nl", "de-baardman.nl"]
 
-# Ranking extractor API endpoint (local)
-RANKING_EXTRACTOR_URL = "http://127.0.0.1:8000/extract"
-
 
 def get_page_context_from_ranking_extractor(url):
     """
-    Call the ranking extractor API to get product information from the page.
+    Extract product information from the page using the integrated ranking extractor.
     Returns a formatted context string for PAA answer generation.
     """
+    if not EXTRACTOR_AVAILABLE:
+        print("Ranking extractor not available")
+        return None
+
     try:
-        response = requests.post(
-            RANKING_EXTRACTOR_URL,
-            json={"url": url},
-            timeout=30
-        )
-
-        if response.status_code != 200:
-            print(f"Ranking extractor failed: {response.status_code}")
-            return None
-
-        data = response.json()
+        # Run async extractor in sync context
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            # Fetch and extract products
+            html, title = loop.run_until_complete(fetch_and_clean(url))
+            data = loop.run_until_complete(extract_products(html, url))
+        finally:
+            loop.close()
 
         # Extract relevant information
         main_topic = data.get("page", {}).get("main_topic", "")
@@ -149,11 +158,8 @@ def get_page_context_from_ranking_extractor(url):
 
         return "\n\n".join(context_parts)
 
-    except requests.exceptions.ConnectionError:
-        print("Ranking extractor not available (not running on localhost:8000)")
-        return None
     except Exception as e:
-        print(f"Error calling ranking extractor: {e}")
+        print(f"Error extracting products: {e}")
         return None
 
 
