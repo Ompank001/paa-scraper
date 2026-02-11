@@ -72,6 +72,90 @@ if GSPREAD_AVAILABLE and GOOGLE_SHEETS_CREDENTIALS:
 # Allowed domains for URL search
 ALLOWED_DOMAINS = ["finerbrew.com", "de-koffiekompas.nl", "de-baardman.nl"]
 
+# Ranking extractor API endpoint (local)
+RANKING_EXTRACTOR_URL = "http://127.0.0.1:8000/extract"
+
+
+def get_page_context_from_ranking_extractor(url):
+    """
+    Call the ranking extractor API to get product information from the page.
+    Returns a formatted context string for PAA answer generation.
+    """
+    try:
+        response = requests.post(
+            RANKING_EXTRACTOR_URL,
+            json={"url": url},
+            timeout=30
+        )
+
+        if response.status_code != 200:
+            print(f"Ranking extractor failed: {response.status_code}")
+            return None
+
+        data = response.json()
+
+        # Extract relevant information
+        main_topic = data.get("page", {}).get("main_topic", "")
+        products = data.get("products", [])
+
+        if not products:
+            return None
+
+        # Build context string
+        context_parts = []
+
+        if main_topic:
+            context_parts.append(f"Hoofdonderwerp pagina: {main_topic}")
+
+        context_parts.append(f"\nProducten op deze pagina:")
+
+        for product in products:
+            rank = product.get("rank", "")
+            name = product.get("name", "")
+            title_label = product.get("title_label")
+            summary = product.get("summary", "")
+            pros = product.get("pros", [])
+            tags = product.get("tags", [])
+
+            product_info = []
+
+            # Add rank and title
+            if rank and title_label:
+                product_info.append(f"{rank}. {title_label}: {name}")
+            elif rank:
+                product_info.append(f"{rank}. {name}")
+            else:
+                product_info.append(f"- {name}")
+
+            # Add summary if available
+            if summary:
+                product_info.append(f"   {summary}")
+
+            # Add key pros (max 3)
+            if pros:
+                top_pros = pros[:3]
+                product_info.append(f"   Voordelen: {', '.join(top_pros)}")
+
+            # Add tags if relevant
+            if tags:
+                if "best_overall" in tags:
+                    product_info.append("   [Beste overall]")
+                if "budget_pick" in tags:
+                    product_info.append("   [Budgetoptie]")
+                if "premium_pick" in tags:
+                    product_info.append("   [Premium keuze]")
+
+            context_parts.append("\n".join(product_info))
+
+        return "\n\n".join(context_parts)
+
+    except requests.exceptions.ConnectionError:
+        print("Ranking extractor not available (not running on localhost:8000)")
+        return None
+    except Exception as e:
+        print(f"Error calling ranking extractor: {e}")
+        return None
+
 
 def extract_page_info(url):
     """
@@ -163,7 +247,7 @@ def determine_main_keyword(h1, meta_title, og_title=""):
     return keyword.strip()
 
 
-def generate_answer(question, context=""):
+def generate_answer(question, page_context=""):
     """
     Generate a well-formatted answer for a FAQ question using OpenAI.
 
@@ -173,11 +257,26 @@ def generate_answer(question, context=""):
     - Neutral, factual tone
     - No first-person, no opinions
     - Clear, simple language
+
+    The AI will decide if page_context is relevant to the question.
     """
     if not openai_client:
         return None
 
     try:
+        context_instruction = ""
+        if page_context:
+            context_instruction = f"""
+PAGINA CONTEXT (gebruik ALLEEN als relevant voor de vraag):
+{page_context}
+
+BELANGRIJKE REGEL OVER CONTEXT:
+- Gebruik de pagina context ALLEEN als deze direct relevant is voor de vraag
+- Als de vraag over een specifiek product/model gaat en dit staat in de context: gebruik het
+- Als de vraag algemeen is ("Wat is...?", "Hoe werkt...?") en de context geen directe waarde toevoegt: negeer de context
+- Forceer NOOIT informatie uit de context als het niet natuurlijk past bij de vraag
+"""
+
         prompt = f"""Je bent een professionele content schrijver. Beantwoord de vraag volgens deze strikte regels:
 
 MANDATORY RULES:
@@ -224,9 +323,9 @@ MANDATORY RULES:
    - Vermijd generieke zinnen die veel voorkomen
    - Voeg duidelijkheid of nuance toe waar mogelijk
 
-Vraag: {question}
+{context_instruction}
 
-{f"Referentie-informatie: {context}" if context else ""}
+Vraag: {question}
 
 Antwoord (40-120 woorden, direct, neutraal, zonder eerste persoon):"""
 
@@ -476,7 +575,7 @@ def publish_to_wordpress(page_url, question, answer):
         return {"error": str(e)}
 
 
-def parse_question(item, keyword="", generate_ai_answer=False):
+def parse_question(item, keyword="", generate_ai_answer=False, page_context=None):
     """Parse a single question item from SerpAPI response."""
     question = item.get("question", "")
 
@@ -503,7 +602,7 @@ def parse_question(item, keyword="", generate_ai_answer=False):
     # Generate AI answer if requested
     generated_answer = None
     if generate_ai_answer and question:
-        generated_answer = generate_answer(question, answer)
+        generated_answer = generate_answer(question, page_context)
 
     return {
         "question": question,
@@ -516,7 +615,7 @@ def parse_question(item, keyword="", generate_ai_answer=False):
     }
 
 
-def scrape_people_also_ask(keyword, expand_questions=True, max_results=20, generate_answers=False):
+def scrape_people_also_ask(keyword, expand_questions=True, max_results=20, generate_answers=False, page_context=None):
     """
     Get the 'People Also Ask' section from Google.nl using SerpAPI.
     Returns a list of dictionaries with question, answer, and source information.
@@ -526,6 +625,7 @@ def scrape_people_also_ask(keyword, expand_questions=True, max_results=20, gener
         expand_questions: If True, fetch additional questions using next_page_token
         max_results: Maximum number of results to return
         generate_answers: If True, generate AI answers for each question
+        page_context: Optional context from ranking extractor for smarter answers
     """
     if not SERPAPI_KEY:
         raise ValueError("SERPAPI_KEY environment variable not set")
@@ -558,7 +658,7 @@ def scrape_people_also_ask(keyword, expand_questions=True, max_results=20, gener
         tokens_to_expand = []
 
         for item in related_questions:
-            parsed = parse_question(item, keyword, generate_ai_answer=generate_answers)
+            parsed = parse_question(item, keyword, generate_ai_answer=generate_answers, page_context=page_context)
             if parsed["question"] and parsed["question"] not in seen_questions:
                 seen_questions.add(parsed["question"])
                 results.append({
@@ -590,7 +690,7 @@ def scrape_people_also_ask(keyword, expand_questions=True, max_results=20, gener
                     for item in expand_data.get("related_questions", []):
                         if len(results) >= max_results:
                             break
-                        parsed = parse_question(item, keyword, generate_ai_answer=generate_answers)
+                        parsed = parse_question(item, keyword, generate_ai_answer=generate_answers, page_context=page_context)
                         if parsed["question"] and parsed["question"] not in seen_questions:
                             seen_questions.add(parsed["question"])
                             results.append({
@@ -681,8 +781,21 @@ def url_search():
                 if not keyword:
                     error = "Kon geen zoekwoord bepalen uit de pagina."
                 else:
-                    # Search PAA with extracted keyword
-                    results = scrape_people_also_ask(keyword, generate_answers=generate_answers)
+                    # Get page context from ranking extractor (if available)
+                    page_context = None
+                    if generate_answers:
+                        page_context = get_page_context_from_ranking_extractor(url)
+                        if page_context:
+                            print(f"✓ Got product context from ranking extractor ({len(page_context)} chars)")
+                        else:
+                            print("⚠ No product context from ranking extractor (not running or no products found)")
+
+                    # Search PAA with extracted keyword and page context
+                    results = scrape_people_also_ask(
+                        keyword,
+                        generate_answers=generate_answers,
+                        page_context=page_context
+                    )
                     if not results:
                         error = "Geen 'Mensen vragen ook' vragen gevonden voor dit zoekwoord."
 
